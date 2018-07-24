@@ -20,7 +20,7 @@ class FairseqCriterion(_Loss):
         """Add criterion-specific arguments to the parser."""
         pass
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, flip=False):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:

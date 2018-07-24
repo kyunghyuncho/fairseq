@@ -177,6 +177,13 @@ def add_distributed_training_args(parser):
 
 def add_optimization_args(parser):
     group = parser.add_argument_group('Optimization')
+
+    ''' 
+    source-side negative sampling
+    '''
+    group.add_argument('--source-neg', action='store_true',
+                       help='source-side negative sampling')
+
     group.add_argument('--max-epoch', '--me', default=0, type=int, metavar='N',
                        help='force stop training at specified epoch')
     group.add_argument('--max-update', '--mu', default=0, type=int, metavar='N',

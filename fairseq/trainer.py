@@ -19,6 +19,8 @@ from fairseq import distributed_utils, optim, utils
 from fairseq.meters import AverageMeter, TimeMeter
 from fairseq.optim import lr_scheduler
 
+import numpy
+
 
 class Trainer(object):
     """Main class for data parallel training.
@@ -347,3 +349,91 @@ class Trainer(object):
         if sample is None or len(sample) == 0:
             return None
         return utils.move_to_cuda(sample)
+
+class TrainerFlipSource(Trainer):
+
+    def _shuffle(self, sample):
+        sources = sample['net_input']['src_tokens']
+        sources_dev = sources.device
+        sources = sources.cpu().numpy()
+        source_lengths = sample['net_input']['src_lengths']
+        source_lengths_dev = source_lengths.device 
+        source_lengths = source_lengths.cpu().numpy()
+
+        n = sources.shape[0]
+        n = numpy.random.permutation(n)
+        shuffled = sources[n,:]
+        shuf_lengths = source_lengths[n]
+
+        sample['net_input']['src_tokens'] = torch.from_numpy(shuffled).to(sources_dev)
+        sample['net_input']['src_lengths'] = torch.from_numpy(shuf_lengths).to(source_lengths_dev)
+
+        return sample
+
+
+
+    def _forward(self, sample, eval=False):
+
+        '''
+        1. compute the usual loss
+        2. shuffle the source sentences
+        3. compute the negative loss
+
+        '''
+
+        # prepare model and optimizer
+        if eval:
+            self.model.eval()
+        else:
+            self.model.train()
+
+        loss = None
+        sample_size = 0
+        logging_output = {
+            'ntokens': sample['ntokens'] if sample is not None else 0,
+            'nsentences': sample['target'].size(0) if sample is not None else 0,
+        }
+        oom = 0
+        if sample is not None:
+            try:
+                with torch.no_grad() if eval else contextlib.ExitStack():
+                    # calculate loss and sample size
+                    loss, sample_size, logging_output_ = self.task.get_loss(self.model, self.criterion, sample)
+                    logging_output.update(logging_output_)
+            except RuntimeError as e:
+                if not eval and 'out of memory' in str(e):
+                    print('| WARNING: ran out of memory, skipping batch')
+                    oom = 1
+                    loss = None
+                else:
+                    raise e
+
+        if not eval and sample is not None:
+            '''
+            shuffle the source sentences and compute the neg-loss
+            '''
+            sample = self._shuffle(sample)
+
+            if sample is not None:
+                try:
+                    with torch.no_grad() if eval else contextlib.ExitStack():
+                        # calculate loss and sample size
+                        loss_neg, _, _ = \
+                                self.task.get_loss(self.model, self.criterion, sample, flip=True)
+                        #logging_output.update(logging_output_)
+                        loss = loss + loss_neg
+                except RuntimeError as e:
+                    if not eval and 'out of memory' in str(e):
+                        print('| WARNING: ran out of memory, skipping batch')
+                        oom = 1
+                        loss = None
+                    else:
+                        raise e
+
+            #import ipdb; ipdb.set_trace()
+            #pass
+
+        return loss, sample_size, logging_output, oom
+
+
+

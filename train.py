@@ -15,6 +15,7 @@ import torch
 from fairseq import data, distributed_utils, options, progress_bar, tasks, utils
 from fairseq.fp16_trainer import FP16Trainer
 from fairseq.trainer import Trainer
+from fairseq.trainer import TrainerFlipSource
 from fairseq.meters import AverageMeter, StopwatchMeter
 
 
@@ -46,7 +47,10 @@ def main(args):
     else:
         if torch.cuda.get_device_capability(0)[0] >= 7:
             print('| NOTICE: your device may support faster training with --fp16')
-        trainer = Trainer(args, task, model, criterion)
+        if args.source_neg:
+            trainer = TrainerFlipSource(args, task, model, criterion)
+        else:
+            trainer = Trainer(args, task, model, criterion)
     print('| training on {} GPUs'.format(args.distributed_world_size))
     print('| max tokens per GPU = {} and max sentences per GPU = {}'.format(
         args.max_tokens,
